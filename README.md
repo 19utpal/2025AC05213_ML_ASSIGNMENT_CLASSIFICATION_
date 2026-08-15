@@ -36,7 +36,7 @@ The app also supports uploading a new CSV file with the required feature columns
 Add your GitHub repository link here before final submission:
 
 ```text
-https://github.com/<your-username>/<your-repository-name>
+[https://github.com/<your-username>/<your-repository-name>](https://github.com/19utpal/2025AC05213_ML_ASSIGNMENT_CLASSIFICATION_.git)
 ```
 
 ## d. Models Used
