@@ -31,13 +31,16 @@ Target column:
 
 The app also supports uploading a new CSV file with the required feature columns. If the uploaded file includes a `class` column, the app calculates evaluation metrics for that uploaded data as well.
 
-## c. GitHub Repository Link
-
-Add your GitHub repository link here before final submission:
+## c.1 GitHub Repository Link
 
 ```text
 (https://github.com/19utpal/2025AC05213_ML_ASSIGNMENT_CLASSIFICATION_.git)
 ```
+
+## c.2 Streamlit.cloud App Link
+
+```text
+[(https://github.com/19utpal/2025AC05213_ML_ASSIGNMENT_CLASSIFICATION_.git)](https://2025ac05213mlassignmentclassification-jhvpvju4zuscwdcx3etxz6.streamlit.app/)
 
 ## d. Models Used
 
