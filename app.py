@@ -5,14 +5,6 @@ import io
 import numpy as np
 import pandas as pd
 import streamlit as st
-from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
-from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, f1_score, matthews_corrcoef, precision_score, recall_score, roc_auc_score
-from sklearn.model_selection import train_test_split
-from sklearn.naive_bayes import GaussianNB
-from sklearn.neighbors import KNeighborsClassifier
-from sklearn.preprocessing import StandardScaler
-from sklearn.tree import DecisionTreeClassifier
 
 
 st.set_page_config(
@@ -29,12 +21,12 @@ BASE_FEATURES = ["alpha", "delta", "u", "g", "r", "i", "z", "redshift"]
 FEATURES = BASE_FEATURES + ["u_g_color", "g_r_color", "r_i_color", "i_z_color"]
 CLASS_NAMES = ["GALAXY", "STAR", "QSO"]
 MODEL_FACTORIES = {
-	"Logistic Regression": lambda: LogisticRegression(max_iter=1000),
-	"Decision Tree": lambda: DecisionTreeClassifier(random_state=42),
-	"kNN": lambda: KNeighborsClassifier(n_neighbors=7),
-	"Naive Bayes": GaussianNB,
-	"Random Forest (Ensemble)": lambda: RandomForestClassifier(n_estimators=150, random_state=42),
-	"Gradient Boosting": lambda: GradientBoostingClassifier(random_state=42),
+	"Logistic Regression": lambda: SoftmaxLogisticRegression(learning_rate=0.08, epochs=450),
+	"Decision Tree": lambda: SimpleDecisionTree(max_depth=7, min_samples_leaf=8, random_state=42),
+	"kNN": lambda: SimpleKNN(n_neighbors=7),
+	"Naive Bayes": lambda: SimpleGaussianNB(),
+	"Random Forest (Ensemble)": lambda: SimpleRandomForest(n_estimators=25, max_depth=7, random_state=42),
+	"Gradient Boosting": lambda: SimpleBoostedTrees(n_estimators=25, max_depth=2, random_state=42),
 }
 
 
@@ -85,25 +77,317 @@ def add_engineered_features(data: pd.DataFrame) -> pd.DataFrame:
 	return processed
 
 
-def calculate_auc(actual: pd.Series, probabilities: pd.DataFrame) -> float:
-	try:
-		return roc_auc_score(actual, probabilities[CLASS_NAMES], labels=CLASS_NAMES, multi_class="ovr", average="weighted")
-	except ValueError:
+class SimpleStandardScaler:
+	def fit(self, values: pd.DataFrame) -> "SimpleStandardScaler":
+		array = np.asarray(values, dtype=float)
+		self.mean_ = array.mean(axis=0)
+		self.scale_ = array.std(axis=0)
+		self.scale_[self.scale_ == 0] = 1.0
+		return self
+
+	def transform(self, values: pd.DataFrame) -> np.ndarray:
+		return (np.asarray(values, dtype=float) - self.mean_) / self.scale_
+
+	def fit_transform(self, values: pd.DataFrame) -> np.ndarray:
+		return self.fit(values).transform(values)
+
+
+def softmax(values: np.ndarray) -> np.ndarray:
+	shifted = values - values.max(axis=1, keepdims=True)
+	exponentials = np.exp(shifted)
+	return exponentials / exponentials.sum(axis=1, keepdims=True)
+
+
+def normalized_counts(labels: np.ndarray, classes: np.ndarray) -> np.ndarray:
+	counts = np.array([(labels == class_name).sum() for class_name in classes], dtype=float)
+	return counts / counts.sum() if counts.sum() else np.full(len(classes), 1 / len(classes))
+
+
+class SoftmaxLogisticRegression:
+	def __init__(self, learning_rate: float = 0.08, epochs: int = 450) -> None:
+		self.learning_rate = learning_rate
+		self.epochs = epochs
+
+	def fit(self, x_values: np.ndarray, y_values: pd.Series) -> "SoftmaxLogisticRegression":
+		self.classes_ = np.array(CLASS_NAMES)
+		class_to_index = {class_name: index for index, class_name in enumerate(self.classes_)}
+		y_indexes = np.array([class_to_index[label] for label in y_values])
+		y_encoded = np.eye(len(self.classes_))[y_indexes]
+		x_with_bias = np.c_[np.ones(len(x_values)), x_values]
+		self.weights_ = np.zeros((x_with_bias.shape[1], len(self.classes_)))
+
+		for _ in range(self.epochs):
+			probabilities = softmax(x_with_bias @ self.weights_)
+			gradient = x_with_bias.T @ (probabilities - y_encoded) / len(x_values)
+			self.weights_ -= self.learning_rate * gradient
+		return self
+
+	def predict_proba(self, x_values: np.ndarray) -> np.ndarray:
+		return softmax(np.c_[np.ones(len(x_values)), x_values] @ self.weights_)
+
+	def predict(self, x_values: np.ndarray) -> np.ndarray:
+		return self.classes_[self.predict_proba(x_values).argmax(axis=1)]
+
+
+class SimpleDecisionTree:
+	def __init__(self, max_depth: int = 7, min_samples_leaf: int = 8, random_state: int = 42, max_features: int | None = None) -> None:
+		self.max_depth = max_depth
+		self.min_samples_leaf = min_samples_leaf
+		self.random_state = random_state
+		self.max_features = max_features
+
+	def fit(self, x_values: np.ndarray, y_values: pd.Series | np.ndarray) -> "SimpleDecisionTree":
+		self.classes_ = np.array(CLASS_NAMES)
+		self.random_generator_ = np.random.default_rng(self.random_state)
+		self.tree_ = self._build_tree(np.asarray(x_values, dtype=float), np.asarray(y_values), depth=0)
+		return self
+
+	def _gini(self, labels: np.ndarray) -> float:
+		probabilities = normalized_counts(labels, self.classes_)
+		return 1 - np.sum(probabilities ** 2)
+
+	def _leaf(self, labels: np.ndarray) -> dict:
+		return {"probabilities": normalized_counts(labels, self.classes_)}
+
+	def _feature_indexes(self, feature_count: int) -> np.ndarray:
+		if self.max_features is None or self.max_features >= feature_count:
+			return np.arange(feature_count)
+		return self.random_generator_.choice(feature_count, size=self.max_features, replace=False)
+
+	def _best_split(self, x_values: np.ndarray, y_values: np.ndarray) -> tuple[int | None, float | None]:
+		best_feature = None
+		best_threshold = None
+		best_score = float("inf")
+		for feature in self._feature_indexes(x_values.shape[1]):
+			thresholds = np.unique(np.quantile(x_values[:, feature], np.linspace(0.1, 0.9, 9)))
+			for threshold in thresholds:
+				left_mask = x_values[:, feature] <= threshold
+				right_mask = ~left_mask
+				if left_mask.sum() < self.min_samples_leaf or right_mask.sum() < self.min_samples_leaf:
+					continue
+				score = (left_mask.mean() * self._gini(y_values[left_mask])) + (right_mask.mean() * self._gini(y_values[right_mask]))
+				if score < best_score:
+					best_feature = int(feature)
+					best_threshold = float(threshold)
+					best_score = score
+		return best_feature, best_threshold
+
+	def _build_tree(self, x_values: np.ndarray, y_values: np.ndarray, depth: int) -> dict:
+		if depth >= self.max_depth or len(np.unique(y_values)) == 1 or len(y_values) < self.min_samples_leaf * 2:
+			return self._leaf(y_values)
+		feature, threshold = self._best_split(x_values, y_values)
+		if feature is None or threshold is None:
+			return self._leaf(y_values)
+		left_mask = x_values[:, feature] <= threshold
+		return {
+			"feature": feature,
+			"threshold": threshold,
+			"left": self._build_tree(x_values[left_mask], y_values[left_mask], depth + 1),
+			"right": self._build_tree(x_values[~left_mask], y_values[~left_mask], depth + 1),
+		}
+
+	def _predict_row_proba(self, row: np.ndarray, node: dict) -> np.ndarray:
+		if "probabilities" in node:
+			return node["probabilities"]
+		branch = node["left"] if row[node["feature"]] <= node["threshold"] else node["right"]
+		return self._predict_row_proba(row, branch)
+
+	def predict_proba(self, x_values: np.ndarray) -> np.ndarray:
+		return np.vstack([self._predict_row_proba(row, self.tree_) for row in np.asarray(x_values, dtype=float)])
+
+	def predict(self, x_values: np.ndarray) -> np.ndarray:
+		return self.classes_[self.predict_proba(x_values).argmax(axis=1)]
+
+
+class SimpleKNN:
+	def __init__(self, n_neighbors: int = 7) -> None:
+		self.n_neighbors = n_neighbors
+
+	def fit(self, x_values: np.ndarray, y_values: pd.Series) -> "SimpleKNN":
+		self.classes_ = np.array(CLASS_NAMES)
+		self.x_train_ = np.asarray(x_values, dtype=float)
+		self.y_train_ = np.asarray(y_values)
+		return self
+
+	def predict_proba(self, x_values: np.ndarray) -> np.ndarray:
+		probabilities = []
+		for row in np.asarray(x_values, dtype=float):
+			distances = np.sqrt(np.sum((self.x_train_ - row) ** 2, axis=1))
+			neighbor_indexes = np.argsort(distances)[: self.n_neighbors]
+			weights = 1 / (distances[neighbor_indexes] + 1e-9)
+			scores = np.zeros(len(self.classes_))
+			for label, weight in zip(self.y_train_[neighbor_indexes], weights):
+				scores[np.where(self.classes_ == label)[0][0]] += weight
+			probabilities.append(scores / scores.sum())
+		return np.vstack(probabilities)
+
+	def predict(self, x_values: np.ndarray) -> np.ndarray:
+		return self.classes_[self.predict_proba(x_values).argmax(axis=1)]
+
+
+class SimpleGaussianNB:
+	def fit(self, x_values: np.ndarray, y_values: pd.Series) -> "SimpleGaussianNB":
+		self.classes_ = np.array(CLASS_NAMES)
+		self.class_priors_ = normalized_counts(np.asarray(y_values), self.classes_)
+		self.means_ = []
+		self.variances_ = []
+		for class_name in self.classes_:
+			class_rows = np.asarray(x_values, dtype=float)[np.asarray(y_values) == class_name]
+			self.means_.append(class_rows.mean(axis=0))
+			self.variances_.append(class_rows.var(axis=0) + 1e-6)
+		self.means_ = np.vstack(self.means_)
+		self.variances_ = np.vstack(self.variances_)
+		return self
+
+	def predict_proba(self, x_values: np.ndarray) -> np.ndarray:
+		log_probabilities = []
+		for mean, variance, prior in zip(self.means_, self.variances_, self.class_priors_):
+			log_likelihood = -0.5 * np.sum(np.log(2 * np.pi * variance) + ((x_values - mean) ** 2 / variance), axis=1)
+			log_probabilities.append(np.log(prior + 1e-12) + log_likelihood)
+		return softmax(np.vstack(log_probabilities).T)
+
+	def predict(self, x_values: np.ndarray) -> np.ndarray:
+		return self.classes_[self.predict_proba(x_values).argmax(axis=1)]
+
+
+class SimpleRandomForest:
+	def __init__(self, n_estimators: int = 25, max_depth: int = 7, random_state: int = 42) -> None:
+		self.n_estimators = n_estimators
+		self.max_depth = max_depth
+		self.random_state = random_state
+
+	def fit(self, x_values: np.ndarray, y_values: pd.Series) -> "SimpleRandomForest":
+		self.classes_ = np.array(CLASS_NAMES)
+		random_generator = np.random.default_rng(self.random_state)
+		self.trees_ = []
+		max_features = max(1, int(np.sqrt(x_values.shape[1])))
+		for tree_index in range(self.n_estimators):
+			row_indexes = random_generator.choice(len(x_values), size=len(x_values), replace=True)
+			tree = SimpleDecisionTree(max_depth=self.max_depth, min_samples_leaf=6, random_state=self.random_state + tree_index, max_features=max_features)
+			tree.fit(x_values[row_indexes], np.asarray(y_values)[row_indexes])
+			self.trees_.append(tree)
+		return self
+
+	def predict_proba(self, x_values: np.ndarray) -> np.ndarray:
+		return np.mean([tree.predict_proba(x_values) for tree in self.trees_], axis=0)
+
+	def predict(self, x_values: np.ndarray) -> np.ndarray:
+		return self.classes_[self.predict_proba(x_values).argmax(axis=1)]
+
+
+class SimpleBoostedTrees:
+	def __init__(self, n_estimators: int = 25, max_depth: int = 2, random_state: int = 42) -> None:
+		self.n_estimators = n_estimators
+		self.max_depth = max_depth
+		self.random_state = random_state
+
+	def fit(self, x_values: np.ndarray, y_values: pd.Series) -> "SimpleBoostedTrees":
+		self.classes_ = np.array(CLASS_NAMES)
+		random_generator = np.random.default_rng(self.random_state)
+		labels = np.asarray(y_values)
+		weights = np.full(len(labels), 1 / len(labels))
+		self.trees_ = []
+		self.tree_weights_ = []
+		for tree_index in range(self.n_estimators):
+			row_indexes = random_generator.choice(len(x_values), size=len(x_values), replace=True, p=weights)
+			tree = SimpleDecisionTree(max_depth=self.max_depth, min_samples_leaf=8, random_state=self.random_state + tree_index)
+			tree.fit(x_values[row_indexes], labels[row_indexes])
+			predicted = tree.predict(x_values)
+			error = np.clip(np.sum(weights[predicted != labels]), 1e-6, 0.95)
+			alpha = max(0.05, np.log((1 - error) / error) + np.log(len(self.classes_) - 1))
+			weights *= np.exp(alpha * (predicted != labels))
+			weights /= weights.sum()
+			self.trees_.append(tree)
+			self.tree_weights_.append(alpha)
+		return self
+
+	def predict_proba(self, x_values: np.ndarray) -> np.ndarray:
+		scores = np.zeros((len(x_values), len(self.classes_)))
+		for tree, tree_weight in zip(self.trees_, self.tree_weights_):
+			predicted = tree.predict(x_values)
+			for class_index, class_name in enumerate(self.classes_):
+				scores[:, class_index] += tree_weight * (predicted == class_name)
+		return softmax(scores)
+
+	def predict(self, x_values: np.ndarray) -> np.ndarray:
+		return self.classes_[self.predict_proba(x_values).argmax(axis=1)]
+
+
+def train_test_split_stratified(x_values: pd.DataFrame, y_values: pd.Series, test_size: float = 0.25, random_state: int = 42):
+	random_generator = np.random.default_rng(random_state)
+	train_indexes = []
+	test_indexes = []
+	for class_name in y_values.unique():
+		class_indexes = y_values[y_values == class_name].index.to_numpy()
+		random_generator.shuffle(class_indexes)
+		test_count = max(1, int(round(len(class_indexes) * test_size)))
+		test_indexes.extend(class_indexes[:test_count])
+		train_indexes.extend(class_indexes[test_count:])
+	return x_values.loc[train_indexes], x_values.loc[test_indexes], y_values.loc[train_indexes], y_values.loc[test_indexes]
+
+
+def rank_auc(binary_actual: np.ndarray, scores: np.ndarray) -> float:
+	positive_count = binary_actual.sum()
+	negative_count = len(binary_actual) - positive_count
+	if positive_count == 0 or negative_count == 0:
 		return float("nan")
+	order = np.argsort(scores)
+	ranks = np.empty_like(order, dtype=float)
+	ranks[order] = np.arange(1, len(scores) + 1)
+	positive_rank_sum = ranks[binary_actual == 1].sum()
+	return (positive_rank_sum - positive_count * (positive_count + 1) / 2) / (positive_count * negative_count)
+
+
+def calculate_auc(actual: pd.Series, probabilities: pd.DataFrame) -> float:
+	actual_values = actual.to_numpy()
+	auc_values = []
+	weights = []
+	for class_name in CLASS_NAMES:
+		binary_actual = (actual_values == class_name).astype(int)
+		auc = rank_auc(binary_actual, probabilities[class_name].to_numpy())
+		if not np.isnan(auc):
+			auc_values.append(auc)
+			weights.append(binary_actual.mean())
+	return float(np.average(auc_values, weights=weights)) if auc_values else float("nan")
 
 
 def evaluation_metrics(actual: pd.Series, predicted: pd.Series, probabilities: pd.DataFrame) -> dict[str, float]:
+	_, confusion = classification_metrics(actual, predicted)
+	total = confusion.to_numpy().sum()
+	accuracy = np.trace(confusion.to_numpy()) / total if total else 0.0
+	precision_values = []
+	recall_values = []
+	f1_values = []
+
+	for class_name in CLASS_NAMES:
+		true_positive = confusion.loc[class_name, class_name]
+		false_positive = confusion[class_name].sum() - true_positive
+		false_negative = confusion.loc[class_name].sum() - true_positive
+		precision = true_positive / (true_positive + false_positive) if true_positive + false_positive else 0.0
+		recall = true_positive / (true_positive + false_negative) if true_positive + false_negative else 0.0
+		f1_value = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
+		class_weight = confusion.loc[class_name].sum() / total if total else 0.0
+		precision_values.append(precision * class_weight)
+		recall_values.append(recall * class_weight)
+		f1_values.append(f1_value * class_weight)
+
+	row_sums = confusion.sum(axis=1).to_numpy(dtype=float)
+	column_sums = confusion.sum(axis=0).to_numpy(dtype=float)
+	correct = np.trace(confusion.to_numpy())
+	mcc_denominator = np.sqrt((total**2 - np.sum(column_sums**2)) * (total**2 - np.sum(row_sums**2)))
+	mcc = ((correct * total) - np.sum(row_sums * column_sums)) / mcc_denominator if mcc_denominator else 0.0
+
 	return {
-		"Accuracy": accuracy_score(actual, predicted),
+		"Accuracy": accuracy,
 		"AUC Score": calculate_auc(actual, probabilities),
-		"Precision": precision_score(actual, predicted, labels=CLASS_NAMES, average="weighted", zero_division=0),
-		"Recall": recall_score(actual, predicted, labels=CLASS_NAMES, average="weighted", zero_division=0),
-		"F1 Score": f1_score(actual, predicted, labels=CLASS_NAMES, average="weighted", zero_division=0),
-		"MCC Score": matthews_corrcoef(actual, predicted),
+		"Precision": sum(precision_values),
+		"Recall": sum(recall_values),
+		"F1 Score": sum(f1_values),
+		"MCC Score": mcc,
 	}
 
 
-def predict_with_model(model, scaler: StandardScaler, input_data: pd.DataFrame) -> tuple[pd.Series, pd.DataFrame]:
+def predict_with_model(model, scaler: SimpleStandardScaler, input_data: pd.DataFrame) -> tuple[pd.Series, pd.DataFrame]:
 	input_features = add_engineered_features(input_data)[FEATURES].astype(float)
 	scaled_input = scaler.transform(input_features)
 	predictions = pd.Series(model.predict(scaled_input), index=input_data.index)
@@ -122,14 +406,8 @@ def train_classification_models(reference_data: pd.DataFrame):
 	y_values = prepared_data["class"]
 	stratify_values = y_values if y_values.value_counts().min() >= 2 else None
 
-	x_train, x_test, y_train, y_test = train_test_split(
-		x_values,
-		y_values,
-		test_size=0.25,
-		random_state=42,
-		stratify=stratify_values,
-	)
-	scaler = StandardScaler()
+	x_train, x_test, y_train, y_test = train_test_split_stratified(x_values, y_values, test_size=0.25, random_state=42)
+	scaler = SimpleStandardScaler()
 	x_train_scaled = scaler.fit_transform(x_train)
 	x_test_scaled = scaler.transform(x_test)
 
@@ -302,10 +580,7 @@ with readme_tab:
 	st.write(", ".join(MODEL_FACTORIES.keys()))
 	st.subheader("Deployment Dependencies")
 	st.code("""streamlit
-scikit-learn
 numpy
-pandas
-matplotlib
-seaborn""")
+pandas""")
 	st.subheader("GitHub Repository Link")
 	st.write("Add your GitHub repository URL here before submitting the PDF.")
