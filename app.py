@@ -318,7 +318,7 @@ def train_test_split_stratified(x_values: pd.DataFrame, y_values: pd.Series, tes
 	train_indexes = []
 	test_indexes = []
 	for class_name in y_values.unique():
-		class_indexes = y_values[y_values == class_name].index.to_numpy()
+		class_indexes = np.array(y_values[y_values == class_name].index, dtype=int, copy=True)
 		random_generator.shuffle(class_indexes)
 		test_count = max(1, int(round(len(class_indexes) * test_size)))
 		test_indexes.extend(class_indexes[:test_count])
@@ -404,7 +404,6 @@ def train_classification_models(reference_data: pd.DataFrame):
 	prepared_data["class"] = prepared_data["class"].astype(str).str.upper()
 	x_values = prepared_data[FEATURES].astype(float)
 	y_values = prepared_data["class"]
-	stratify_values = y_values if y_values.value_counts().min() >= 2 else None
 
 	x_train, x_test, y_train, y_test = train_test_split_stratified(x_values, y_values, test_size=0.25, random_state=42)
 	scaler = SimpleStandardScaler()
