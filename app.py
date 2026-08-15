@@ -214,8 +214,7 @@ reference_data = load_reference_data()
 models, feature_scaler, model_metrics, model_observations = train_classification_models(reference_data)
 
 st.title("SDSS Stellar Classification")
-st.caption("Single-file Streamlit Cloud app")
-st.caption("2025ac05213_ML_Assignment Streamlit Cloud app")
+st.caption("Single-file Streamlit Cloud app with embedded reference data.")
 
 st.sidebar.header("Controls")
 selected_model_name = st.sidebar.selectbox("Classification model", list(MODEL_FACTORIES))
@@ -301,5 +300,12 @@ with readme_tab:
 	st.write("The embedded dataset contains celestial coordinates, SDSS photometric magnitudes, redshift, engineered color-index features, and the target class label.")
 	st.subheader("Models Used")
 	st.write(", ".join(MODEL_FACTORIES.keys()))
+	st.subheader("Deployment Dependencies")
+	st.code("""streamlit
+scikit-learn
+numpy
+pandas
+matplotlib
+seaborn""")
 	st.subheader("GitHub Repository Link")
 	st.write("Add your GitHub repository URL here before submitting the PDF.")
