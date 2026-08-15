@@ -5,6 +5,14 @@ import io
 import numpy as np
 import pandas as pd
 import streamlit as st
+from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score, f1_score, matthews_corrcoef, precision_score, recall_score, roc_auc_score
+from sklearn.model_selection import train_test_split
+from sklearn.naive_bayes import GaussianNB
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.preprocessing import StandardScaler
+from sklearn.tree import DecisionTreeClassifier
 
 
 st.set_page_config(
@@ -20,6 +28,14 @@ H4sIAMSOgGoC/3y9y45tOZed1xegN4k8WLyTTbXcMWDYcsNuFQpSuVRAATJKUkdP7/mNwR1Brgz4R0kZ
 BASE_FEATURES = ["alpha", "delta", "u", "g", "r", "i", "z", "redshift"]
 FEATURES = BASE_FEATURES + ["u_g_color", "g_r_color", "r_i_color", "i_z_color"]
 CLASS_NAMES = ["GALAXY", "STAR", "QSO"]
+MODEL_FACTORIES = {
+	"Logistic Regression": lambda: LogisticRegression(max_iter=1000),
+	"Decision Tree": lambda: DecisionTreeClassifier(random_state=42),
+	"kNN": lambda: KNeighborsClassifier(n_neighbors=7),
+	"Naive Bayes": GaussianNB,
+	"Random Forest (Ensemble)": lambda: RandomForestClassifier(n_estimators=150, random_state=42),
+	"Gradient Boosting": lambda: GradientBoostingClassifier(random_state=42),
+}
 
 
 st.markdown(
@@ -69,48 +85,84 @@ def add_engineered_features(data: pd.DataFrame) -> pd.DataFrame:
 	return processed
 
 
-@st.cache_data
-def build_reference_model(reference_data: pd.DataFrame) -> tuple[pd.DataFrame, pd.Series, pd.Series]:
-	reference_data = add_engineered_features(reference_data)
-	reference_features = reference_data[FEATURES].astype(float)
-	means = reference_features.mean()
-	standard_deviations = reference_features.std().replace(0, 1)
-	scaled_features = (reference_features - means) / standard_deviations
-	return scaled_features, means, standard_deviations
+def calculate_auc(actual: pd.Series, probabilities: pd.DataFrame) -> float:
+	try:
+		return roc_auc_score(actual, probabilities[CLASS_NAMES], labels=CLASS_NAMES, multi_class="ovr", average="weighted")
+	except ValueError:
+		return float("nan")
 
 
-def predict_with_knn(
-	input_data: pd.DataFrame,
-	reference_features: pd.DataFrame,
-	reference_labels: pd.Series,
-	means: pd.Series,
-	standard_deviations: pd.Series,
-	neighbor_count: int,
-) -> tuple[list[str], pd.DataFrame]:
+def evaluation_metrics(actual: pd.Series, predicted: pd.Series, probabilities: pd.DataFrame) -> dict[str, float]:
+	return {
+		"Accuracy": accuracy_score(actual, predicted),
+		"AUC Score": calculate_auc(actual, probabilities),
+		"Precision": precision_score(actual, predicted, labels=CLASS_NAMES, average="weighted", zero_division=0),
+		"Recall": recall_score(actual, predicted, labels=CLASS_NAMES, average="weighted", zero_division=0),
+		"F1 Score": f1_score(actual, predicted, labels=CLASS_NAMES, average="weighted", zero_division=0),
+		"MCC Score": matthews_corrcoef(actual, predicted),
+	}
+
+
+def predict_with_model(model, scaler: StandardScaler, input_data: pd.DataFrame) -> tuple[pd.Series, pd.DataFrame]:
 	input_features = add_engineered_features(input_data)[FEATURES].astype(float)
-	scaled_input = ((input_features - means) / standard_deviations).to_numpy()
-	scaled_reference = reference_features.to_numpy()
-	labels = reference_labels.to_numpy()
+	scaled_input = scaler.transform(input_features)
+	predictions = pd.Series(model.predict(scaled_input), index=input_data.index)
+	probability_values = model.predict_proba(scaled_input)
+	probabilities = pd.DataFrame(0.0, index=input_data.index, columns=CLASS_NAMES)
+	for index, class_name in enumerate(model.classes_):
+		probabilities[class_name] = probability_values[:, index]
+	return predictions, probabilities
 
-	predictions = []
-	probabilities = []
 
-	for row in scaled_input:
-		distances = np.sqrt(np.sum((scaled_reference - row) ** 2, axis=1))
-		neighbor_indexes = np.argsort(distances)[:neighbor_count]
-		neighbor_distances = distances[neighbor_indexes]
-		neighbor_labels = labels[neighbor_indexes]
-		weights = 1 / (neighbor_distances + 1e-9)
+@st.cache_resource
+def train_classification_models(reference_data: pd.DataFrame):
+	prepared_data = add_engineered_features(reference_data)
+	prepared_data["class"] = prepared_data["class"].astype(str).str.upper()
+	x_values = prepared_data[FEATURES].astype(float)
+	y_values = prepared_data["class"]
+	stratify_values = y_values if y_values.value_counts().min() >= 2 else None
 
-		scores = {class_name: 0.0 for class_name in CLASS_NAMES}
-		for label, weight in zip(neighbor_labels, weights):
-			scores[label] += float(weight)
+	x_train, x_test, y_train, y_test = train_test_split(
+		x_values,
+		y_values,
+		test_size=0.25,
+		random_state=42,
+		stratify=stratify_values,
+	)
+	scaler = StandardScaler()
+	x_train_scaled = scaler.fit_transform(x_train)
+	x_test_scaled = scaler.transform(x_test)
 
-		total_score = sum(scores.values()) or 1.0
-		probabilities.append({class_name: scores[class_name] / total_score for class_name in CLASS_NAMES})
-		predictions.append(max(scores, key=scores.get))
+	models = {}
+	metric_rows = []
+	for model_name, create_model in MODEL_FACTORIES.items():
+		model = create_model()
+		model.fit(x_train_scaled, y_train)
+		models[model_name] = model
+		predicted = pd.Series(model.predict(x_test_scaled), index=y_test.index)
+		probabilities = pd.DataFrame(0.0, index=y_test.index, columns=CLASS_NAMES)
+		for index, class_name in enumerate(model.classes_):
+			probabilities[class_name] = model.predict_proba(x_test_scaled)[:, index]
 
-	return predictions, pd.DataFrame(probabilities)
+		metric_rows.append({"ML Model Name": model_name, **evaluation_metrics(y_test, predicted, probabilities)})
+
+	metrics_table = pd.DataFrame(metric_rows).sort_values(["F1 Score", "MCC Score", "Accuracy"], ascending=False)
+	winner = metrics_table.iloc[0]["ML Model Name"]
+	return models, scaler, metrics_table, build_observations(metrics_table, winner)
+
+
+def build_observations(metrics_table: pd.DataFrame, winner: str) -> pd.DataFrame:
+	observations = {
+		"Logistic Regression": "Strong linear baseline; performs well when scaled photometric features separate classes with near-linear boundaries.",
+		"Decision Tree": "Captures non-linear rules but can overfit individual splits, so it is useful to compare against ensemble models.",
+		"kNN": "Distance-based model that benefits from scaling; performance depends strongly on local neighborhood structure.",
+		"Naive Bayes": "Fast probabilistic baseline; usually weaker here because color bands and magnitudes are correlated rather than independent.",
+		"Random Forest (Ensemble)": "Combines many trees to reduce overfitting and usually gives stable results on tabular astronomy features.",
+		"Gradient Boosting": "Sequential ensemble that can model subtle non-linear feature interactions and often competes for the best score.",
+	}
+	rows = [{"ML Model Name": model_name, "Observation about model performance": observations[model_name]} for model_name in MODEL_FACTORIES]
+	rows.append({"ML Model Name": "Overall Winner", "Observation about model performance": f"{winner} has the best combined F1 Score, MCC Score, and Accuracy on the holdout split."})
+	return pd.DataFrame(rows)
 
 
 def classification_metrics(actual: pd.Series, predicted: pd.Series) -> tuple[dict[str, float], pd.DataFrame]:
@@ -159,13 +211,14 @@ def show_metrics(metrics: dict[str, float]) -> None:
 
 
 reference_data = load_reference_data()
-reference_features, feature_means, feature_standard_deviations = build_reference_model(reference_data)
+models, feature_scaler, model_metrics, model_observations = train_classification_models(reference_data)
 
 st.title("SDSS Stellar Classification")
-st.caption("Single-file Streamlit Cloud app with embedded reference data.")
+st.caption("Single-file Streamlit Cloud app )
+st.caption("2025ac05213_ML_Assignment Streamlit Cloud app")
 
 st.sidebar.header("Controls")
-neighbor_count = st.sidebar.slider("Nearest neighbors", min_value=3, max_value=25, value=7, step=2)
+selected_model_name = st.sidebar.selectbox("Classification model", list(MODEL_FACTORIES))
 data_source = st.sidebar.radio("Dataset", ["Use embedded reference data", "Upload another CSV"])
 
 st.sidebar.markdown("Required columns: `alpha`, `delta`, `u`, `g`, `r`, `i`, `z`, `redshift`. Add `class` to calculate metrics.")
@@ -180,24 +233,22 @@ else:
 	active_data = reference_data.copy()
 
 try:
-	predictions, probabilities = predict_with_knn(
+	selected_model = models[selected_model_name]
+	predictions, probabilities = predict_with_model(
+		selected_model,
+		feature_scaler,
 		active_data,
-		reference_features,
-		reference_data["class"],
-		feature_means,
-		feature_standard_deviations,
-		neighbor_count,
 	)
 except ValueError as error:
 	st.error(str(error))
 	st.stop()
 
 result_data = active_data.copy()
-result_data["predicted_class"] = predictions
+result_data["predicted_class"] = predictions.to_list()
 for class_name in CLASS_NAMES:
 	result_data[f"probability_{class_name.lower()}"] = probabilities[class_name]
 
-overview, predictions_tab, data_tab = st.tabs(["Overview", "Predictions", "Data"])
+overview, comparison_tab, predictions_tab, data_tab, readme_tab = st.tabs(["Overview", "Model Comparison", "Predictions", "Data", "README Notes"])
 
 with overview:
 	st.subheader("Reference Dataset")
@@ -208,8 +259,9 @@ with overview:
 
 	if "class" in active_data.columns:
 		clean_actual = active_data["class"].astype(str).str.upper()
-		metrics, confusion = classification_metrics(clean_actual, pd.Series(predictions))
-		st.subheader("Evaluation Metrics")
+		metrics = evaluation_metrics(clean_actual, predictions, probabilities)
+		_, confusion = classification_metrics(clean_actual, predictions)
+		st.subheader(f"Evaluation Metrics: {selected_model_name}")
 		show_metrics(metrics)
 		st.subheader("Confusion Matrix")
 		st.dataframe(confusion, use_container_width=True)
@@ -219,8 +271,15 @@ with overview:
 	st.subheader("Predicted Class Mix")
 	st.bar_chart(result_data["predicted_class"].value_counts().reindex(CLASS_NAMES, fill_value=0))
 
+with comparison_tab:
+	st.subheader("Step 2: Classification Model Evaluation Metrics")
+	st.dataframe(model_metrics.style.format({column: "{:.4f}" for column in model_metrics.columns if column != "ML Model Name"}), use_container_width=True)
+	st.subheader("Model Performance Observations")
+	st.dataframe(model_observations, use_container_width=True, hide_index=True)
+	st.info("Metrics are calculated on the same embedded SDSS dataset using a stratified 75/25 train-test split.")
+
 with predictions_tab:
-	st.subheader("Classified Records")
+	st.subheader(f"Classified Records: {selected_model_name}")
 	st.dataframe(result_data, use_container_width=True)
 	st.download_button(
 		"Download predictions",
@@ -234,3 +293,13 @@ with data_tab:
 	st.dataframe(reference_data.head(100), use_container_width=True)
 	st.subheader("Feature Summary")
 	st.dataframe(add_engineered_features(reference_data)[FEATURES].describe(), use_container_width=True)
+
+with readme_tab:
+	st.subheader("Problem Statement")
+	st.write("Classify SDSS astronomical objects into GALAXY, STAR, or QSO using supervised machine learning models and compare model performance.")
+	st.subheader("Dataset Description")
+	st.write("The embedded dataset contains celestial coordinates, SDSS photometric magnitudes, redshift, engineered color-index features, and the target class label.")
+	st.subheader("Models Used")
+	st.write(", ".join(MODEL_FACTORIES.keys()))
+	st.subheader("GitHub Repository Link")
+	st.write("Add your GitHub repository URL here before submitting the PDF.")
