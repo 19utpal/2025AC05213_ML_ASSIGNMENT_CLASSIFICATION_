@@ -1,81 +1,115 @@
-# Sloan Digital Sky Survey (SDSS) Stellar Classification Project
-
-An end-to-end Machine Learning pipeline utilizing the Sloan Digital Sky Survey (SDSS) DR17 dataset to classify cosmic targets into GALAXY, STAR, or QSO (Quasars). Features a robust 12-dimensional engineered model suite and a high-fidelity Streamlit cloud portal interface.
-
----
+# SDSS Stellar Classification
 
 ## a. Problem Statement
-Determining the classification of star systems, galaxies, and super-active galactic nuclei (Quasars) from optical telescope parameters is a foundational task in astrophysics. The challenge is to reconstruct precise class maps from astronomical positions, optical magnitudes, and cosmic redshifts. Real-time categorization of high-volume telescope feeds requires automated classifiers that outperform traditional hand-tuned astronomical filters on correctness, speed, and cross-metric validation.
 
----
+This project classifies Sloan Digital Sky Survey astronomical objects into three target classes: GALAXY, STAR, and QSO. The Streamlit application trains multiple classification models on the same embedded SDSS dataset and compares their performance using standard evaluation metrics.
+
+The app is designed as a self-contained `app.py` file. The reference dataset and model logic are embedded directly in the Python file, so the app does not require a separate CSV file, saved model file, or scikit-learn installation.
 
 ## b. Dataset Description
-The model is trained on the public **Sloan Digital Sky Survey (SDSS) DR17** cosmic observations catalog.
-- **Instance Count**: 100,000 observations (min instance size 500 requirement met).
-- **Features Size**: Exactly 12 active physical characteristics (min feature size 12 requirement met).
-- **Target Classes**: `GALAXY` (0), `STAR` (1), `QSO` (Quasar) (2).
 
-### Variables Dictionary:
-1. `alpha`: Right Ascension angle (Celestial Position).
-2. `delta`: Declination angle (Celestial Position).
-3. `u`: Ultraviolet Filter Band magnitude.
-4. `g`: Green Filter Band magnitude.
-5. `r`: Red Filter Band magnitude.
-6. `i`: Near Infrared Filter Band magnitude.
-7. `z`: Far Infrared Filter Band magnitude.
-8. `redshift`: Wavelength expansion shift index based on relative velocity (strongly correlates to distance).
-9. `u_g_color` (*Engineered*): Difference between Ultraviolet (u) and Green (g) bands.
-10. `g_r_color` (*Engineered*): Difference between Green (g) and Red (r) bands.
-11. `r_i_color` (*Engineered*): Difference between Red (r) and Near Infrared (i) bands.
-12. `i_z_color` (*Engineered*): Difference between Near Infrared (i) and Far Infrared (z) bands.
+The dataset contains 1,000 SDSS astronomical records. Each record includes celestial coordinates, photometric magnitude bands, redshift, engineered color-index features, and a class label.
 
----
+Input features used for training and prediction:
+
+- `alpha`
+- `delta`
+- `u`
+- `g`
+- `r`
+- `i`
+- `z`
+- `redshift`
+- `u_g_color`
+- `g_r_color`
+- `r_i_color`
+- `i_z_color`
+
+Target column:
+
+- `class`: GALAXY, STAR, or QSO
+
+The app also supports uploading a new CSV file with the required feature columns. If the uploaded file includes a `class` column, the app calculates evaluation metrics for that uploaded data as well.
 
 ## c. GitHub Repository Link
-The complete workspace is hosted at:
-[GitHub Repository - Astronomical Star Classification](https://github.com/your-username/star_classification_project)
 
----
+Add your GitHub repository link here before final submission:
 
-## d. Models Used and Evaluation Comparisons
+```text
+https://github.com/<your-username>/<your-repository-name>
+```
 
-The comparison metrics below are calculated on the 20% stratified evaluation partition (20,000 samples) during the model runtime pipeline.
+## d. Models Used
 
-### Model Performance Metrics
+The following six classification models are implemented in `app.py` and evaluated on the same dataset:
+
+| ML Model Name | Description |
+| --- | --- |
+| Logistic Regression | Softmax logistic regression implemented with NumPy gradient descent |
+| Decision Tree | Custom Gini-based decision tree classifier |
+| kNN | Custom K-Nearest Neighbor classifier |
+| Naive Bayes | Custom Gaussian Naive Bayes classifier |
+| Random Forest (Ensemble) | Custom ensemble of bootstrapped decision trees |
+| Gradient Boosting | Custom boosted tree-style ensemble |
+
+The app calculates the following metrics for every model:
+
+- Accuracy
+- AUC Score
+- Precision
+- Recall
+- F1 Score
+- Matthews Correlation Coefficient (MCC Score)
+
+The full comparison table is displayed in the Streamlit app under the **Model Comparison** tab.
+
+## Model Comparison Table
+
+The Streamlit app generates this table dynamically at runtime:
 
 | ML Model Name | Accuracy | AUC | Precision | Recall | F1 | MCC |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **Logistic Regression** | 0.9565 | 0.9865 | 0.9565 | 0.9565 | 0.9561 | 0.9229 |
-| **Decision Tree** | 0.9771 | 0.9858 | 0.9769 | 0.9771 | 0.9769 | 0.9592 |
-| **kNN** | 0.9495 | 0.9786 | 0.9496 | 0.9495 | 0.9494 | 0.9102 |
-| **Naive Bayes** | 0.7255 | 0.9171 | 0.7791 | 0.7255 | 0.6467 | 0.5097 |
-| **Random Forest (Ensemble)** | 0.9801 | 0.9964 | 0.9800 | 0.9801 | 0.9800 | 0.9647 |
-| **Gradient Boosting (Ensemble)** | 0.9806 | 0.9969 | 0.9805 | 0.9806 | 0.9805 | 0.9654 |
+| --- | --- | --- | --- | --- | --- | --- |
+| Logistic Regression | Calculated in app | Calculated in app | Calculated in app | Calculated in app | Calculated in app | Calculated in app |
+| Decision Tree | Calculated in app | Calculated in app | Calculated in app | Calculated in app | Calculated in app | Calculated in app |
+| kNN | Calculated in app | Calculated in app | Calculated in app | Calculated in app | Calculated in app | Calculated in app |
+| Naive Bayes | Calculated in app | Calculated in app | Calculated in app | Calculated in app | Calculated in app | Calculated in app |
+| Random Forest (Ensemble) | Calculated in app | Calculated in app | Calculated in app | Calculated in app | Calculated in app | Calculated in app |
+| Gradient Boosting | Calculated in app | Calculated in app | Calculated in app | Calculated in app | Calculated in app | Calculated in app |
 
-### Observations on Model Performance
+## Observations on Model Performance
 
 | ML Model Name | Observation about model performance |
-| :--- | :--- |
-| **Logistic Regression** | Performed strongly with **95.65% Accuracy** once magnitudes and celestial positions were normalized using StandardScaler. Represents a robust linear boundary baseline, but suffers slightly when handling complex non-linear combinations of magnitude curves. |
-| **Decision Tree** | Achieved excellent results (**97.71% Accuracy**). Decouples feature scales naturally. Pruning the maximum depth at 10 protected the tree from splitting on regional noise while remaining highly responsive to structural parameters. |
-| **kNN** | Delivered robust results (**94.95% Accuracy**). While sensitive to the scaled coordinates, performance remains very solid thanks to the custom color band engineered index combinations. |
-| **Naive Bayes** | Recorded the lowest performance (**72.55% Accuracy**, **0.5097 MCC**). This is primarily driven by the "feature independence" assumption of Naive Bayes, which is violated by the highly correlated photometric filters ($u, g, r, i, z$) and our engineered color indexes. |
-| **Random Forest** | Outstanding classification performance (**98.01% Accuracy**). Constructing an ensemble of 100 estimators naturally smoothed high individual variance and delivered reliable probability boundaries. |
-| **Gradient Boosting** | Achieved peak accuracy at **98.06%** with a **0.9654 MCC Score**. Sequential learning on error residuals proved heavily responsive to subtle features, particularly in distinguishing distant Quasars (QSOs) from bright local stars. |
+| --- | --- |
+| Logistic Regression | Strong linear baseline; works well when scaled photometric features separate classes with near-linear boundaries. |
+| Decision Tree | Captures non-linear rules but may overfit individual splits, making it useful as a comparison against ensemble models. |
+| kNN | Distance-based model that benefits from scaling; performance depends on local neighborhood structure. |
+| Naive Bayes | Fast probabilistic baseline; can be weaker because magnitude and color-band features are correlated. |
+| Random Forest (Ensemble) | Combines many trees to reduce overfitting and usually gives stable performance on tabular astronomy features. |
+| Gradient Boosting | Sequential ensemble that can model non-linear feature interactions and often competes for the best score. |
+| Overall Winner | Displayed dynamically in the app based on F1 Score, MCC Score, and Accuracy on the holdout split. |
 
-### Overall Winner for your dataset?
-**Gradient Boosting (HistGradientBoostingClassifier)** is the overall winner. It achieved the highest overall scores across every benchmark metric, including a peak Accuracy of **98.06%** and an MCC Score of **0.9654**, indicating extremely stable class predictions.
+## How to Run
 
----
+Install the runtime packages available in the environment:
 
-## How to Run locally on BITS Virtual Lab
+```bash
+pip install streamlit numpy pandas
+```
 
-1. Place `star_classification.csv` in your environment path or specify its target path.
-2. Execute the model execution and training pipeline python file using:
-   ```bash
-   python train_models.py
-   ```
-3. Boot up the Streamlit interface:
-   ```bash
-   streamlit run app.py
-   ```
+Run the app:
+
+```bash
+streamlit run app.py
+```
+
+## Deployment Notes
+
+This version intentionally avoids external project-file dependencies:
+
+- No external `test_csv.csv` is required.
+- No saved model files are required.
+- No `scikit-learn` package is required.
+- The dataset is embedded directly in `app.py`.
+- The classification models and metrics are implemented directly in `app.py`.
+
+For the BITS Virtual Lab screenshot requirement, open the app and capture the **Model Comparison** tab, because it shows all implemented models and their evaluation metrics.
