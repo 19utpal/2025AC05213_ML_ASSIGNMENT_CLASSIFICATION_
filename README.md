@@ -36,7 +36,7 @@ The app also supports uploading a new CSV file with the required feature columns
 Add your GitHub repository link here before final submission:
 
 ```text
-[https://github.com/<your-username>/<your-repository-name>](https://github.com/19utpal/2025AC05213_ML_ASSIGNMENT_CLASSIFICATION_.git)
+(https://github.com/19utpal/2025AC05213_ML_ASSIGNMENT_CLASSIFICATION_.git)
 ```
 
 ## d. Models Used
@@ -88,28 +88,5 @@ The Streamlit app generates this table dynamically at runtime:
 | Gradient Boosting | Sequential ensemble that can model non-linear feature interactions and often competes for the best score. |
 | Overall Winner | Displayed dynamically in the app based on F1 Score, MCC Score, and Accuracy on the holdout split. |
 
-## How to Run
 
-Install the runtime packages available in the environment:
 
-```bash
-pip install streamlit numpy pandas
-```
-
-Run the app:
-
-```bash
-streamlit run app.py
-```
-
-## Deployment Notes
-
-This version intentionally avoids external project-file dependencies:
-
-- No external `test_csv.csv` is required.
-- No saved model files are required.
-- No `scikit-learn` package is required.
-- The dataset is embedded directly in `app.py`.
-- The classification models and metrics are implemented directly in `app.py`.
-
-For the BITS Virtual Lab screenshot requirement, open the app and capture the **Model Comparison** tab, because it shows all implemented models and their evaluation metrics.
