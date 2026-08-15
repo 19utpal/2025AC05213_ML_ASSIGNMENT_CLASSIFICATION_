@@ -214,7 +214,7 @@ reference_data = load_reference_data()
 models, feature_scaler, model_metrics, model_observations = train_classification_models(reference_data)
 
 st.title("SDSS Stellar Classification")
-st.caption("Single-file Streamlit Cloud app )
+st.caption("Single-file Streamlit Cloud app")
 st.caption("2025ac05213_ML_Assignment Streamlit Cloud app")
 
 st.sidebar.header("Controls")
